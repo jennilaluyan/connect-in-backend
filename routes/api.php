@@ -3,8 +3,9 @@
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\AuthController;
-use App\Http\Controllers\Api\SuperAdminController; // <-- Tambahkan ini
-// use App\Http\Controllers\Api\HrController; // <-- Tambahkan ini jika Anda membuat controller untuk HR
+use App\Http\Controllers\Api\SuperAdminController;
+use App\Http\Controllers\Api\JobPostingController;
+use App\Http\Controllers\Api\JobApplicationController;
 
 /*
 |--------------------------------------------------------------------------
@@ -21,23 +22,30 @@ use App\Http\Controllers\Api\SuperAdminController; // <-- Tambahkan ini
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 
+// --- RUTE PUBLIK UNTUK MELIHAT LOWONGAN KERJA ---
+Route::get('/job-postings', [JobPostingController::class, 'index'])->name('job-postings.index.public');
+Route::get('/job-postings/{job_posting}', [JobPostingController::class, 'show'])->name('job-postings.show.public');
+
+
 // Rute yang memerlukan autentikasi umum (Sanctum)
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/user', function (Request $request) {
-        return $request->user(); // Mendapatkan data user yang sedang login
+        return $request->user();
     });
-    // Anda bisa tambahkan rute lain yang bisa diakses semua user terautentikasi di sini
-    // Contoh: Route::post('/update-profile', [ProfileController::class, 'update']);
+
+    // --- RUTE USER MELAMAR PEKERJAAN ---
+    // {job_posting} adalah model binding ke JobPosting model
+    // Pastikan middleware 'role:user' sudah terdefinisi dan bekerja dengan benar
+    Route::post('/job-postings/{job_posting}/apply', [JobApplicationController::class, 'store'])
+        ->middleware('role:user')
+        ->name('job-applications.store');
 });
 
 // Rute Khusus untuk Super Admin
 Route::middleware(['auth:sanctum', 'superadmin'])->prefix('superadmin')->name('superadmin.')->group(function () {
-    // name('superadmin.') akan memberi prefix nama pada rute, contoh: superadmin.pending-hr
-    // Berguna jika Anda menggunakan named routes di backend/testing. Opsional untuk API murni.
-
     Route::get('/pending-hr-applications', [SuperAdminController::class, 'getPendingHrApplications'])->name('pending-hr');
-    Route::post('/hr-applications/{user}/approve', [SuperAdminController::class, 'approveHrApplication'])->name('hr.approve'); // {user} adalah ID user
+    Route::post('/hr-applications/{user}/approve', [SuperAdminController::class, 'approveHrApplication'])->name('hr.approve');
     Route::post('/hr-applications/{user}/reject', [SuperAdminController::class, 'rejectHrApplication'])->name('hr.reject');
     Route::delete('/users/{user}', [SuperAdminController::class, 'deleteUser'])->name('users.delete');
     Route::get('/users', [SuperAdminController::class, 'getAllUsers'])->name('users.index');
@@ -45,13 +53,18 @@ Route::middleware(['auth:sanctum', 'superadmin'])->prefix('superadmin')->name('s
 
 // Rute Khusus untuk HR Department (yang sudah diapprove)
 Route::middleware(['auth:sanctum', 'role:hr'])->prefix('hr')->name('hr.')->group(function () {
-    // Contoh rute untuk HR
-    // Route::get('/dashboard', [HrController::class, 'dashboard'])->name('dashboard');
-    // Route::post('/job-postings', [HrController::class, 'createJobPosting'])->name('jobpostings.store');
-    // Route::get('/job-postings', [HrController::class, 'getJobPostings'])->name('jobpostings.index');
-    // Route::get('/applicants', [HrController::class, 'getApplicants'])->name('applicants.index');
+    // Membuat lowongan baru
+    Route::post('/job-postings', [JobPostingController::class, 'store'])->name('job-postings.store');
 
-    // Untuk saat ini, kita bisa tambahkan contoh sederhana:
+    // Memperbarui lowongan
+    Route::put('/job-postings/{job_posting}', [JobPostingController::class, 'update'])->name('job-postings.update');
+
+    // Menghapus lowongan
+    Route::delete('/job-postings/{job_posting}', [JobPostingController::class, 'destroy'])->name('job-postings.destroy');
+
+    // Rute untuk HR melihat postingan mereka sendiri
+    Route::get('/my-job-postings', [JobPostingController::class, 'index'])->name('job-postings.my-index'); // Nama rute akan menjadi hr.job-postings.my-index
+
     Route::get('/info', function () {
         return response()->json([
             'message' => 'Selamat datang di area HR Department!',
@@ -60,12 +73,8 @@ Route::middleware(['auth:sanctum', 'role:hr'])->prefix('hr')->name('hr.')->group
     })->name('info');
 });
 
-// Rute untuk User Biasa (yang sudah diapprove - user biasa otomatis diapprove status HR-nya)
+// Rute untuk User Biasa (yang sudah diapprove)
 Route::middleware(['auth:sanctum', 'role:user'])->prefix('user')->name('user.')->group(function () {
-    // Contoh rute untuk user biasa
-    // Route::get('/my-applications', [UserController::class, 'myApplications'])->name('applications');
-
-    // Untuk saat ini, kita bisa tambahkan contoh sederhana:
     Route::get('/info', function () {
         return response()->json([
             'message' => 'Ini adalah area untuk user biasa.',
