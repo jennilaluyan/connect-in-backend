@@ -6,42 +6,32 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\SuperAdminController;
 use App\Http\Controllers\Api\JobPostingController;
 use App\Http\Controllers\Api\JobApplicationController;
+use App\Http\Controllers\Api\ProfileController; // Tambahkan ini
 
-/*
-|--------------------------------------------------------------------------
-| API Routes
-|--------------------------------------------------------------------------
-|
-| Here is where you can register API routes for your application. These
-| routes are loaded by the RouteServiceProvider and all of them will
-| be assigned to the "api" middleware group. Make something great!
-|
-*/
-
-// Rute Publik untuk Autentikasi
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 
-// --- RUTE PUBLIK UNTUK MELIHAT LOWONGAN KERJA ---
 Route::get('/job-postings', [JobPostingController::class, 'index'])->name('job-postings.index.public');
 Route::get('/job-postings/{job_posting}', [JobPostingController::class, 'show'])->name('job-postings.show.public');
 
-
-// Rute yang memerlukan autentikasi umum (Sanctum)
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/user', function (Request $request) {
         return $request->user();
     });
 
-    // --- RUTE USER MELAMAR PEKERJAAN ---
+    // Rute Profil Pengguna
+    Route::get('/profile', [ProfileController::class, 'show'])->name('profile.show');
+    Route::post('/profile', [ProfileController::class, 'update'])->name('profile.update'); // Menggunakan POST karena FormData
+
     Route::post('/job-postings/{job_posting}/apply', [JobApplicationController::class, 'store'])
-        ->middleware('role:user') // Middleware role:user bisa juga ditaruh di grup 'user' di bawah jika lebih sesuai
-        ->name('job-applications.store.user'); // Penamaan lebih spesifik
+        ->middleware('role:user')
+        ->name('job-applications.store.user');
 });
 
 // Rute Khusus untuk Super Admin
 Route::middleware(['auth:sanctum', 'superadmin'])->prefix('superadmin')->name('superadmin.')->group(function () {
+    // ... rute superadmin lainnya
     Route::get('/pending-hr-applications', [SuperAdminController::class, 'getPendingHrApplications'])->name('pending-hr');
     Route::post('/hr-applications/{user}/approve', [SuperAdminController::class, 'approveHrApplication'])->name('hr.approve');
     Route::post('/hr-applications/{user}/reject', [SuperAdminController::class, 'rejectHrApplication'])->name('hr.reject');
@@ -51,25 +41,15 @@ Route::middleware(['auth:sanctum', 'superadmin'])->prefix('superadmin')->name('s
 
 // RUTE KHUSUS UNTUK HR DEPARTMENT (YANG SUDAH DIAPPROVE)
 Route::middleware(['auth:sanctum', 'role:hr'])->prefix('hr')->name('hr.')->group(function () {
-    
-    // --- CRUD Job Postings oleh HR ---
+    // ... rute HR lainnya
     Route::post('/job-postings', [JobPostingController::class, 'store'])->name('job-postings.store');
-    // Jika menggunakan FormData dengan _method spoofing dari frontend fetch untuk update file:
-    Route::post('/job-postings/{job_posting}', [JobPostingController::class, 'update'])->name('job-postings.update.with-file'); 
-    // Alternatif jika frontend bisa mengirim PUT murni (misal dengan Axios) dan tidak ada file, atau file dihandle terpisah:
-    // Route::put('/job-postings/{job_posting}', [JobPostingController::class, 'update'])->name('job-postings.update');
+    Route::post('/job-postings/{job_posting}', [JobPostingController::class, 'update'])->name('job-postings.update.with-file');
     Route::delete('/job-postings/{job_posting}', [JobPostingController::class, 'destroy'])->name('job-postings.destroy');
     Route::get('/my-job-postings', [JobPostingController::class, 'index'])->name('job-postings.my-index');
-
-    // --- Rute untuk HR Mengelola Lamaran ---
     Route::get('/applicants', [JobApplicationController::class, 'indexForHr'])->name('applicants.index');
     Route::get('/applicants/{application}/download-cv', [JobApplicationController::class, 'downloadCv'])->name('applicants.downloadCv');
-    
-    // RUTE BARU UNTUK AKSI TERIMA/TOLAK LAMARAN
     Route::post('/applicants/{application}/accept', [JobApplicationController::class, 'acceptApplication'])->name('applicants.accept');
     Route::post('/applicants/{application}/reject', [JobApplicationController::class, 'rejectApplication'])->name('applicants.reject');
-
-    // Rute Info HR
     Route::get('/info', function () {
         return response()->json([
             'message' => 'Selamat datang di area HR Department!',
@@ -78,11 +58,9 @@ Route::middleware(['auth:sanctum', 'role:hr'])->prefix('hr')->name('hr.')->group
     })->name('info');
 });
 
-
-// Rute untuk User Biasa (yang sudah diapprove)
+// Rute untuk User Biasa
 Route::middleware(['auth:sanctum', 'role:user'])->prefix('user')->name('user.')->group(function () {
-    // Contoh rute, user biasa melihat lowongan melalui rute publik.
-    // Fungsionalitas spesifik user (misal, melihat histori lamaran mereka) bisa ditambahkan di sini.
+    // ... rute user lainnya
     Route::get('/info', function () {
         return response()->json([
             'message' => 'Ini adalah area untuk user biasa.',
