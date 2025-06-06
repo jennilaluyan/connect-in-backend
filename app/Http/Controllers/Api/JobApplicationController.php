@@ -5,39 +5,39 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\JobApplication;
 use App\Models\JobPosting;
-use App\Models\User; // Pastikan User model di-import
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
-use Illuminate\Support\Str; // Ditambahkan untuk Str::slug
+use Illuminate\Support\Str;
+// Notifikasi sudah di-import
+use App\Notifications\NewJobApplicationNotification;
+use App\Notifications\ApplicationStatusUpdatedNotification;
 
 class JobApplicationController extends Controller
 {
     /**
      * User melamar pekerjaan.
-     * Request akan datang ke route seperti: POST /api/job-postings/{job_posting}/apply
      */
-    public function store(Request $request, JobPosting $job_posting) // Menggunakan Route Model Binding untuk $job_posting
+    public function store(Request $request, JobPosting $job_posting)
     {
         $user = Auth::user();
 
-        // Pastikan user yang melamar adalah 'user' biasa, bukan HR atau SA (jika ada aturan seperti itu)
-        if (!$user || $user->role !== 'user') { // Ditambahkan pengecekan !$user
+        if (!$user || $user->role !== 'user') {
             return response()->json(['message' => 'Hanya pencari kerja yang terautentikasi yang dapat melamar.'], 403);
         }
 
-        // Validasi: User hanya bisa melamar sekali untuk pekerjaan yang sama
         $existingApplication = JobApplication::where('job_posting_id', $job_posting->id)
             ->where('user_id', $user->id)
             ->first();
         if ($existingApplication) {
-            return response()->json(['message' => 'Anda sudah pernah melamar untuk pekerjaan ini.'], 409); // 409 Conflict
+            return response()->json(['message' => 'Anda sudah pernah melamar untuk pekerjaan ini.'], 409);
         }
 
         $validator = Validator::make($request->all(), [
-            'cv' => 'required|file|mimes:pdf,doc,docx|max:5120', // Max 5MB (5 * 1024 KB)
+            'cv' => 'required|file|mimes:pdf,doc,docx|max:5120',
             'cover_letter' => 'nullable|string|max:5000',
         ]);
 
@@ -48,220 +48,166 @@ class JobApplicationController extends Controller
         $cvPath = null;
         if ($request->hasFile('cv')) {
             try {
-                // Buat nama file yang unik
                 $originalFileName = pathinfo($request->file('cv')->getClientOriginalName(), PATHINFO_FILENAME);
                 $extension = $request->file('cv')->getClientOriginalExtension();
                 $fileNameToStore = 'cv_' . $user->id . '_' . $job_posting->id . '_' . time() . '_' . Str::slug($originalFileName) . '.' . $extension;
-
-                // Simpan file ke 'storage/app/public/cvs'
-                // cvPath akan menyimpan path relatif dari root disk 'public', misal 'cvs/namafile.pdf'
+                
                 $cvPath = $request->file('cv')->storeAs('cvs', $fileNameToStore, 'public');
-                Log::info('CV uploaded by User ID ' . $user->id . ' for Job ID ' . $job_posting->id . ' to path: ' . $cvPath);
+                Log::info('CV diunggah oleh User ID ' . $user->id, ['path' => $cvPath]);
             } catch (\Exception $e) {
-                Log::error('Gagal mengunggah CV untuk User ID ' . $user->id . ': ' . $e->getMessage());
+                Log::error('Gagal mengunggah CV', ['user_id' => $user->id, 'error' => $e->getMessage()]);
                 return response()->json(['message' => 'Gagal mengunggah CV.', 'errors' => ['cv' => ['Terjadi kesalahan saat mengunggah file.']]], 500);
             }
-        } else {
-            return response()->json(['message' => 'File CV dibutuhkan.', 'errors' => ['cv' => ['File CV wajib diunggah.']]], 422);
         }
-
 
         try {
             $application = JobApplication::create([
                 'job_posting_id' => $job_posting->id,
                 'user_id' => $user->id,
-                'cv_path' => $cvPath, // Simpan path relatif yang dikembalikan oleh storeAs()
+                'cv_path' => $cvPath,
                 'cover_letter' => $request->input('cover_letter'),
-                'status' => 'pending', // Status awal lamaran
+                'status' => 'pending',
             ]);
+            
+            // Load relasi yang diperlukan untuk notifikasi dan respons
+            $application->load(['applicant:id,name,email', 'jobPosting.poster']);
 
-            // Load relasi untuk data respons yang lebih informatif
-            $application->load(['applicant:id,name,email', 'jobPosting:id,title']);
+            // --- NOTIFIKASI DIKIRIM DI SINI ---
+            $hrUser = $application->jobPosting->poster; // Ambil HR dari relasi
+            if ($hrUser) {
+                $hrUser->notify(new NewJobApplicationNotification($application));
+                Log::info('Notifikasi lamaran baru dikirim ke HR ID: ' . $hrUser->id);
+            } else {
+                Log::error('Gagal mengirim notifikasi: Data HR (poster) tidak ditemukan untuk JobPosting ID: ' . $application->job_posting_id);
+            }
+            // --- BATAS PENAMBAHAN ---
 
-            return response()->json([
-                'message' => 'Lamaran Anda berhasil dikirim!',
-                'data' => $application
-            ], 201);
+            return response()->json(['message' => 'Lamaran Anda berhasil dikirim!', 'data' => $application], 201);
         } catch (\Exception $e) {
-            Log::error('Gagal menyimpan lamaran untuk User ID ' . $user->id . ' ke database: ' . $e->getMessage());
-            // Jika file sudah terunggah tapi gagal simpan ke DB, idealnya file dihapus
+            Log::error('Gagal menyimpan lamaran', ['user_id' => $user->id, 'error' => $e->getMessage()]);
             if ($cvPath && Storage::disk('public')->exists($cvPath)) {
                 Storage::disk('public')->delete($cvPath);
-                Log::info('Uploaded CV file deleted due to DB save failure: ' . $cvPath);
             }
-            return response()->json(['message' => 'Terjadi kesalahan internal saat mengirim lamaran Anda. Silakan coba lagi nanti.'], 500);
+            return response()->json(['message' => 'Terjadi kesalahan internal saat mengirim lamaran Anda.'], 500);
         }
     }
 
     /**
      * HR melihat daftar pelamar.
-     * Bisa difilter berdasarkan job_posting_id atau menampilkan semua pelamar
-     * untuk pekerjaan yang diposting oleh HR tersebut.
-     * Dipanggil dari route: GET /api/hr/applicants
      */
     public function indexForHr(Request $request)
     {
         $hrUser = Auth::user();
-        // Pastikan method isApprovedHr() ada di model User
         if (!$hrUser || !(method_exists($hrUser, 'isApprovedHr') && $hrUser->isApprovedHr())) {
             return response()->json(['message' => 'Unauthorized. Hanya HR yang diapprove yang dapat melihat pelamar.'], 403);
         }
 
-        // Ambil semua ID pekerjaan yang diposting oleh HR ini
         $hrJobPostingIds = JobPosting::where('posted_by', $hrUser->id)->pluck('id');
 
         if ($hrJobPostingIds->isEmpty()) {
-            return response()->json(['data' => [], 'links' => null, 'meta' => null, 'message' => 'Anda belum memiliki pekerjaan yang diposting atau tidak ada pelamar untuk pekerjaan Anda.']);
+            return response()->json(['data' => [], 'message' => 'Tidak ada pelamar atau Anda belum memposting pekerjaan.']);
         }
 
-        $query = JobApplication::with([
-            'applicant:id,name,email,avatar_img_url', // Data pelamar yang dibutuhkan
-            'jobPosting:id,title,company_name'      // Data pekerjaan yang dilamar
-        ])
-            ->whereIn('job_posting_id', $hrJobPostingIds); // Hanya lamaran untuk pekerjaan yang diposting HR ini
+        $query = JobApplication::with(['applicant:id,name,email,avatar_img_url', 'jobPosting:id,title,company_name'])
+            ->whereIn('job_posting_id', $hrJobPostingIds);
 
-        // Opsional: filter berdasarkan job_posting_id spesifik jika diberikan dari frontend
-        if ($request->filled('job_posting_id')) {
-            $jobPostingId = $request->input('job_posting_id');
-            // Pastikan job_posting_id ini memang milik HR tersebut
-            if ($hrJobPostingIds->contains($jobPostingId)) {
-                $query->where('job_posting_id', $jobPostingId);
-            } else {
-                // Jika HR mencoba mengakses pelamar untuk pekerjaan yang bukan miliknya
-                return response()->json(['message' => 'Anda tidak memiliki akses ke pelamar untuk pekerjaan ini.'], 403);
-            }
+        if ($request->filled('job_posting_id') && $hrJobPostingIds->contains($request->input('job_posting_id'))) {
+            $query->where('job_posting_id', $request->input('job_posting_id'));
         }
         
-        // Urutkan berdasarkan tanggal lamaran terbaru untuk setiap pekerjaan
         $applications = $query->latest('created_at')->paginate($request->input('limit', 15));
-
         return response()->json($applications);
     }
 
     /**
      * HR mengunduh CV pelamar.
-     * Dipanggil dari route: GET /api/hr/applicants/{application}/download-cv
      */
-    public function downloadCv(JobApplication $application) // Menggunakan Route Model Binding
+    public function downloadCv(JobApplication $application)
     {
         $hrUser = Auth::user();
+        $jobPosting = $application->jobPosting;
 
-        // Otorisasi: Pastikan HR yang meminta adalah HR yang memposting pekerjaan terkait
-        // dan HR tersebut sudah diapprove
-        $jobPosting = $application->jobPosting; // Mengambil jobPosting dari relasi
-
-        if (
-            !$hrUser ||
-            !(method_exists($hrUser, 'isApprovedHr') && $hrUser->isApprovedHr()) ||
-            !$jobPosting || // Pastikan jobPosting ada
-            $jobPosting->posted_by !== $hrUser->id
-        ) {
-            Log::warning('Unauthorized CV download attempt.', [
-                'hr_user_id' => $hrUser ? $hrUser->id : 'Guest/Unauthorized',
-                'application_id' => $application->id,
-                'job_posted_by' => $jobPosting ? $jobPosting->posted_by : 'N/A'
-            ]);
+        if (!$hrUser || !(method_exists($hrUser, 'isApprovedHr') && $hrUser->isApprovedHr()) || !$jobPosting || $jobPosting->posted_by !== $hrUser->id) {
             return response()->json(['message' => 'Unauthorized untuk mengakses CV ini.'], 403);
         }
 
         if (!$application->cv_path || !Storage::disk('public')->exists($application->cv_path)) {
-            Log::error('CV file not found for application ID ' . $application->id . '. Path: ' . $application->cv_path);
             return response()->json(['message' => 'File CV tidak ditemukan.'], 404);
         }
 
-        // Buat nama file download yang lebih informatif
         $applicantName = $application->applicant ? Str::slug($application->applicant->name, '_') : 'applicant_' . $application->user_id;
         $jobTitle = $application->jobPosting ? Str::slug($application->jobPosting->title, '_') : 'job_' . $application->job_posting_id;
         $originalExtension = pathinfo(Storage::disk('public')->path($application->cv_path), PATHINFO_EXTENSION);
         $downloadFileName = 'CV_' . $applicantName . '_' . $jobTitle . '.' . $originalExtension;
 
-        Log::info('HR User ID ' . $hrUser->id . ' downloading CV for application ID ' . $application->id . '. Path: ' . $application->cv_path);
         return Storage::disk('public')->download($application->cv_path, $downloadFileName);
     }
 
-    // --- METODE BARU UNTUK TERIMA LAMARAN ---
     /**
-     * HR menerima lamaran pekerjaan (mengubah status).
-     * Dipanggil dari route: POST /api/hr/applicants/{application}/accept
+     * HR menerima lamaran pekerjaan (mengubah status ke 'shortlisted').
      */
-    public function acceptApplication(Request $request, JobApplication $application)
+    public function acceptApplication(JobApplication $application)
     {
-        $hrUser = Auth::user();
-        $jobPosting = $application->jobPosting; 
-
-        if (
-            !$hrUser ||
-            !(method_exists($hrUser, 'isApprovedHr') && $hrUser->isApprovedHr()) || 
-            !$jobPosting ||
-            $jobPosting->posted_by !== $hrUser->id
-        ) {
-            Log::warning('Unauthorized application status update attempt (accept).', [
-                'hr_user_id' => $hrUser ? $hrUser->id : 'Guest/Unauthorized',
-                'application_id' => $application->id,
-                'job_posted_by' => $jobPosting ? $jobPosting->posted_by : 'N/A'
-            ]);
-            return response()->json(['message' => 'Unauthorized untuk mengubah status lamaran ini.'], 403);
-        }
-
-        if ($application->status === 'pending' || $application->status === 'reviewed') {
-            $application->status = 'shortlisted'; // Atau 'hired'
-            $application->save();
-            $application->load(['applicant:id,name,email,avatar_img_url', 'jobPosting:id,title,company_name']);
-            
-            Log::info('Application ID ' . $application->id . ' accepted (shortlisted) by HR ID ' . $hrUser->id);
-            return response()->json([
-                'message' => 'Lamaran berhasil diterima (status diubah ke Shortlisted).',
-                'data' => $application
-            ]);
-        }
-
-        Log::info('Application ID ' . $application->id . ' could not be accepted by HR ID ' . $hrUser->id . '. Current status: ' . $application->status);
-        return response()->json([
-            'message' => 'Lamaran tidak dapat diterima (mungkin statusnya bukan Pending atau Reviewed).',
-            'data' => $application
-        ], 400);
+        return $this->updateApplicationStatus($application, 'shortlisted', 'diterima (shortlisted)');
     }
 
-    // --- METODE BARU UNTUK TOLAK LAMARAN ---
     /**
-     * HR menolak lamaran pekerjaan (mengubah status).
-     * Dipanggil dari route: POST /api/hr/applicants/{application}/reject
+     * HR menolak lamaran pekerjaan (mengubah status ke 'rejected').
      */
-    public function rejectApplication(Request $request, JobApplication $application)
+    public function rejectApplication(JobApplication $application)
+    {
+        return $this->updateApplicationStatus($application, 'rejected', 'ditolak');
+    }
+
+    /**
+     * HR mempekerjakan pelamar (mengubah status ke 'hired').
+     */
+    public function hireApplicant(JobApplication $application)
+    {
+        return $this->updateApplicationStatus($application, 'hired', 'di-hire');
+    }
+
+    /**
+     * Metode private untuk menangani logika update status.
+     */
+    private function updateApplicationStatus(JobApplication $application, string $newStatus, string $actionVerb)
     {
         $hrUser = Auth::user();
         $jobPosting = $application->jobPosting;
 
-        if (
-            !$hrUser ||
-            !(method_exists($hrUser, 'isApprovedHr') && $hrUser->isApprovedHr()) ||
-            !$jobPosting ||
-            $jobPosting->posted_by !== $hrUser->id
-        ) {
-            Log::warning('Unauthorized application status update attempt (reject).', [
-                'hr_user_id' => $hrUser ? $hrUser->id : 'Guest/Unauthorized',
-                'application_id' => $application->id,
-                'job_posted_by' => $jobPosting ? $jobPosting->posted_by : 'N/A'
-            ]);
+        if (!$hrUser || !(method_exists($hrUser, 'isApprovedHr') && $hrUser->isApprovedHr()) || !$jobPosting || $jobPosting->posted_by !== $hrUser->id) {
             return response()->json(['message' => 'Unauthorized untuk mengubah status lamaran ini.'], 403);
         }
 
-        if ($application->status !== 'rejected' && $application->status !== 'hired') {
-            $application->status = 'rejected';
-            $application->save();
-            $application->load(['applicant:id,name,email,avatar_img_url', 'jobPosting:id,title,company_name']);
+        $validTransitions = [
+            'shortlisted' => ['pending', 'reviewed'],
+            'rejected' => ['pending', 'reviewed', 'shortlisted'],
+            'hired' => ['shortlisted'],
+        ];
 
-            Log::info('Application ID ' . $application->id . ' rejected by HR ID ' . $hrUser->id);
-            return response()->json([
-                'message' => 'Lamaran berhasil ditolak.',
-                'data' => $application
-            ]);
+        if (!isset($validTransitions[$newStatus]) || !in_array($application->status, $validTransitions[$newStatus])) {
+            return response()->json(['message' => "Lamaran dengan status '{$application->status}' tidak dapat diubah menjadi '{$newStatus}'."], 400);
         }
+
+        $application->status = $newStatus;
+        $application->save();
+
+        // Load relasi applicant agar bisa mengirim notifikasi
+        $application->load('applicant');
+
+        // --- NOTIFIKASI DIKIRIM DI SINI ---
+        $applicantUser = $application->applicant; // Ambil user yang melamar dari relasi
+        if ($applicantUser) {
+            $applicantUser->notify(new ApplicationStatusUpdatedNotification($application));
+            Log::info("Notifikasi status '{$newStatus}' dikirim ke User ID: " . $applicantUser->id);
+        }
+        // --- BATAS PENAMBAHAN ---
         
-        Log::info('Application ID ' . $application->id . ' could not be rejected by HR ID ' . $hrUser->id . '. Current status: ' . $application->status);
+        $application->load(['applicant:id,name,email,avatar_img_url', 'jobPosting:id,title,company_name']);
+
         return response()->json([
-            'message' => 'Lamaran tidak dapat ditolak (mungkin statusnya sudah final atau sudah ditolak).',
+            'message' => "Lamaran berhasil {$actionVerb}.",
             'data' => $application
-        ], 400);
+        ]);
     }
 }
