@@ -6,41 +6,30 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
-use Illuminate\Support\Facades\Storage; // Ditambahkan untuk accessor avatar
+use Illuminate\Support\Facades\Storage;
 
 class User extends Authenticatable
 {
     use HasApiTokens, HasFactory, Notifiable;
 
-    /**
-     * The attributes that are mass assignable.
-     *
-     * @var array<int, string>
-     */
     protected $fillable = [
         'name',
         'email',
         'password',
-        'role', // Kemungkinan nilai: 'user', 'hr', 'superadmin'
+        'role',
         'is_hr_approved_by_sa',
-        'avatar_img', // Path ke file avatar, contoh: 'avatars/namafile.jpg'
+        'avatar_img',
+        'headline',       // Ditambahkan
+        'company_name',   // Ditambahkan
+        'city',           // Ditambahkan
+        'province',       // Ditambahkan
     ];
 
-    /**
-     * The attributes that should be hidden for serialization.
-     *
-     * @var array<int, string>
-     */
     protected $hidden = [
         'password',
         'remember_token',
     ];
 
-    /**
-     * The attributes that should be cast.
-     *
-     * @return array<string, string>
-     */
     protected function casts(): array
     {
         return [
@@ -50,67 +39,56 @@ class User extends Authenticatable
         ];
     }
 
-    /**
-     * Mendapatkan URL lengkap untuk gambar avatar pengguna.
-     *
-     * @return string|null
-     */
+    // app/Models/User.php
     public function getAvatarImgUrlAttribute(): ?string
     {
         if ($this->avatar_img && Storage::disk('public')->exists($this->avatar_img)) {
-            // Asumsi $this->avatar_img menyimpan path relatif dari root 'storage/app/public/',
-            // contoh: 'avatars/user_1.jpg'
-            return Storage::url($this->avatar_img);
+            // Storage::url() akan menghasilkan path relatif seperti /storage/avatars/file.jpg
+            // Laravel secara otomatis akan mengubahnya menjadi URL absolut saat serialisasi ke JSON jika APP_URL benar
+            $urlPath = Storage::url($this->avatar_img);
+            // Pastikan tidak ada tanda kutip yang ditambahkan di sini secara manual.
+            // Jika $this->avatar_img sendiri mengandung kutip, itu masalah di penyimpanan.
+            return $urlPath;
         }
-        // URL ke avatar default jika tidak ada atau file tidak ditemukan
-        // Anda bisa menggunakan layanan seperti ui-avatars.com atau path ke gambar default lokal
-        return 'https://ui-avatars.com/api/?name=' . urlencode($this->name) . '&background=random&color=fff&size=128&font-size=0.33';
+        return asset('assets/Default.jpg');
     }
 
-    /**
-     * Tambahkan avatar_img_url ke output JSON/array secara default.
-     *
-     * @var array
-     */
+    // Untuk memastikan role_name juga ada saat user di-serialize
+    public function getRoleNameAttribute(): string
+    {
+        switch ($this->role) {
+            case 'superadmin':
+                return 'Super Administrator';
+            case 'hr':
+                return 'HR Department';
+            case 'user':
+                return 'User';
+            default:
+                return ucfirst($this->role);
+        }
+    }
+
+
     protected $appends = [
-        'avatar_img_url' // Ini akan membuat accessor getAvatarImgUrlAttribute() dipanggil otomatis
-        // saat model di-serialize ke JSON atau array.
+        'avatar_img_url',
+        'role_name', // Tambahkan ini jika ingin role_name selalu ada di output JSON
     ];
 
-    /**
-     * Mendapatkan semua lowongan pekerjaan yang diposting oleh user (jika user adalah HR).
-     */
     public function jobPostings()
     {
         return $this->hasMany(JobPosting::class, 'posted_by');
     }
 
-    /**
-     * Memeriksa apakah pengguna memiliki peran tertentu.
-     *
-     * @param  string  $roleName
-     * @return bool
-     */
     public function hasRole(string $roleName): bool
     {
         return $this->role === $roleName;
     }
 
-    /**
-     * Memeriksa apakah pengguna adalah HR yang sudah diapprove.
-     *
-     * @return bool
-     */
     public function isApprovedHr(): bool
     {
         return $this->role === 'hr' && $this->is_hr_approved_by_sa === true;
     }
 
-    /**
-     * Memeriksa apakah pengguna adalah Super Admin.
-     *
-     * @return bool
-     */
     public function isSuperAdmin(): bool
     {
         return $this->role === 'superadmin';
