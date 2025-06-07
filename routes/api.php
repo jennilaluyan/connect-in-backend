@@ -7,7 +7,7 @@ use App\Http\Controllers\Api\SuperAdminController;
 use App\Http\Controllers\Api\JobPostingController;
 use App\Http\Controllers\Api\JobApplicationController;
 use App\Http\Controllers\Api\UserJobController;
-use App\Http\Controllers\Api\NotificationController; // <-- TAMBAHKAN IMPORT INI
+use App\Http\Controllers\Api\NotificationController;
 
 /*
 |--------------------------------------------------------------------------
@@ -27,13 +27,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/user', function (Request $request) {
         return $request->user();
     });
-
-    // --- RUTE UNTUK NOTIFIKASI (UNTUK SEMUA USER YANG LOGIN) ---
     Route::get('/notifications', [NotificationController::class, 'index'])->name('notifications.index');
     Route::post('/notifications/mark-all-as-read', [NotificationController::class, 'markAllAsRead'])->name('notifications.markAllAsRead');
-    // --- BATAS PENAMBAHAN RUTE NOTIFIKASI ---
-
-    // Rute untuk user melamar (tetap di sini agar URL-nya /api/job-postings/...)
     Route::post('/job-postings/{job_posting}/apply', [JobApplicationController::class, 'store'])
         ->middleware('role:user')
         ->name('job-applications.store');
@@ -43,6 +38,9 @@ Route::middleware('auth:sanctum')->group(function () {
 Route::middleware(['auth:sanctum', 'role:user'])->prefix('user')->name('user.')->group(function () {
     Route::get('/info', fn() => response()->json(['message' => 'Ini area user biasa.', 'user' => auth()->user()]))->name('info');
     Route::get('/my-jobs', [UserJobController::class, 'myJobs'])->name('my-jobs');
+    
+    // --- RUTE BARU UNTUK RIWAYAT LAMARAN ---
+    Route::get('/my-applications', [UserJobController::class, 'myApplications'])->name('my-applications');
 });
 
 // Rute Khusus untuk HR
