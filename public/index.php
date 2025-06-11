@@ -1,7 +1,5 @@
 <?php
 
-die('Server PHP is alive and processing!');
-
 use Illuminate\Foundation\Application;
 use Illuminate\Http\Request;
 

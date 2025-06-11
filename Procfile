@@ -1,0 +1,1 @@
+web: php artisan config:clear && php artisan route:clear && php artisan view:clear && heroku-php-apache2 public/
