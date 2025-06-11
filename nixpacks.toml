@@ -1,5 +1,11 @@
 # nixpacks.toml
 
 [phases.setup]
-# Menambahkan ekstensi PHP yang dibutuhkan Laravel untuk Postgres dan lainnya
-nixPkgs = ["php", "phpPackages.composer", "phpExtensions.pdo_pgsql", "phpExtensions.bcmath"]
+# Menambahkan Node.js kembali ke daftar, beserta ekstensi PHP yang dibutuhkan
+nixPkgs = [
+    "php",
+    "phpPackages.composer",
+    "nodejs_18",
+    "phpExtensions.pdo_pgsql",
+    "phpExtensions.bcmath"
+]
