@@ -16,6 +16,10 @@ use App\Http\Controllers\Api\ProfileController;
 |--------------------------------------------------------------------------
 */
 
+Route::get('/', function () {
+    return response()->json(['status' => true, 'message' => 'Connect-In API is ready!']);
+});
+
 // RUTE PUBLIK (Tidak Perlu Login)
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
@@ -54,7 +58,7 @@ Route::middleware(['auth:sanctum', 'role:user'])->prefix('user')->name('user.')-
 // RUTE KHUSUS UNTUK 'HR' SAJA (YANG SUDAH DIAPPROVE)
 Route::middleware(['auth:sanctum', 'role:hr'])->prefix('hr')->name('hr.')->group(function () {
     Route::get('/info', fn() => response()->json(['message' => 'Selamat datang di area HR.', 'user' => auth()->user()]))->name('info');
-    
+
     // CRUD Job Postings oleh HR
     Route::get('/my-job-postings', [JobPostingController::class, 'index'])->name('job-postings.my-index');
     Route::post('/job-postings', [JobPostingController::class, 'store'])->name('job-postings.store');
