@@ -16,6 +16,10 @@ use App\Http\Controllers\Api\ProfileController;
 |--------------------------------------------------------------------------
 */
 
+Route::get('/', function () {
+    return response()->json(['status' => true, 'message' => 'Connect-In API is online and healthy!']);
+});
+
 // RUTE PUBLIK (Tidak Perlu Login)
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
