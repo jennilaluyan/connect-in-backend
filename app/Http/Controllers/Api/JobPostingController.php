@@ -1,5 +1,4 @@
 <?php
-// app/Http/Controllers/Api/JobPostingController.php
 
 namespace App\Http\Controllers\Api;
 
