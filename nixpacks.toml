@@ -1,4 +1,6 @@
-# nixpacks.toml (Percobaan Versi Minimalis)
+# nixpacks.toml (Versi Final yang Benar)
 
 [phases.setup]
-nixPkgs = ["php82Extensions.pgsql", "php82Extensions.pdo_pgsql"]
+# Kuncinya adalah menambahkan "php" dan "composer" ke dalam daftar.
+# Sesuaikan versi PHP jika perlu (misal: php83, php83Extensions).
+nixPkgs = ["php82", "composer", "php82Extensions.pgsql", "php82Extensions.pdo_pgsql", "php82Extensions.intl"]
