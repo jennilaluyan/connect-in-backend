@@ -45,7 +45,7 @@ class UserJobController extends Controller
         // Ambil semua lamaran milik user, beserta detail pekerjaan yang terkait.
         // Eager load memastikan kita tidak membuat N+1 query.
         $applications = JobApplication::where('user_id', $user->id)
-            ->with('jobPosting:id,title,company_name,type,company_logo_url') // Ambil hanya data yang relevan
+            ->with('jobPosting:id,title,company_name,type') // Ambil hanya data yang relevan
             ->latest() // Urutkan berdasarkan yang paling baru dilamar
             ->paginate(20); // Anda bisa sesuaikan limit paginasi
 
