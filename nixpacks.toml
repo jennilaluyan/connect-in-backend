@@ -1,6 +1,0 @@
-# nixpacks.toml (Versi Final)
-
-[phases.setup]
-# Kita HANYA perlu menentukan versi PHP dan ekstensi yang dibutuhkan.
-# Nixpacks akan mengurus instalasi Composer secara otomatis.
-nixPkgs = ["php82", "php82Extensions.pgsql", "php82Extensions.pdo_pgsql", "php82Extensions.intl"]
