@@ -63,87 +63,47 @@ class JobPostingController extends Controller
         }
     }
 
-    public function store(Request $request, JobPosting $job_posting)
+    public function store(Request $request)
     {
-        Log::info('--- JobApplicationController@store: Mulai Proses Lamaran ---');
-        $user = Auth::user();
-
-        if (!$user || $user->role !== 'user') {
-            Log::warning('Akses lamaran ditolak: User tidak terautentikasi atau bukan role "user".', ['user_id' => $user->id ?? 'Guest']);
-            return response()->json(['message' => 'Hanya pencari kerja yang terautentikasi yang dapat melamar.'], 403);
+        // 1. Otorisasi: Pastikan yang mengakses adalah HR yang sudah diapprove
+        $currentUser = Auth::user();
+        if (!$currentUser || !$currentUser->isApprovedHr()) {
+            return response()->json(['message' => 'Unauthorized. Hanya HR yang sudah diapprove yang dapat memposting pekerjaan.'], 403);
         }
-        Log::info('Langkah 1: User terverifikasi sebagai pelamar.', ['user_id' => $user->id]);
 
-        $existingApplication = JobApplication::where('job_posting_id', $job_posting->id)
-            ->where('user_id', $user->id)
-            ->first();
-        if ($existingApplication) {
-            Log::warning('Lamaran ditolak: User sudah pernah melamar.', ['user_id' => $user->id, 'job_id' => $job_posting->id]);
-            return response()->json(['message' => 'Anda sudah pernah melamar untuk pekerjaan ini.'], 409);
-        }
-        Log::info('Langkah 2: Verifikasi lamaran duplikat berhasil.');
-
+        // 2. Validasi: Periksa semua input dari form
         $validator = Validator::make($request->all(), [
-            'cv' => 'required|file|mimes:pdf,doc,docx|max:5120',
-            'cover_letter' => 'nullable|string|max:5000',
+            'title' => 'required|string|max:255',
+            'company_name' => 'required|string|max:255',
+            'type' => 'required|in:part-time,magang,full-time,kontrak',
+            'location' => 'required|string|max:255',
+            'description' => 'required|string',
+            'requirements' => 'required|string',
+            'responsibilities' => 'required|string',
+            'salary_min' => 'nullable|numeric|gte:0|required_with:salary_max|lte:salary_max',
+            'salary_max' => 'nullable|numeric|gte:salary_min',
+            'benefits' => 'nullable|string',
         ]);
 
         if ($validator->fails()) {
-            Log::error('Validasi gagal.', ['errors' => $validator->errors()]);
             return response()->json(['errors' => $validator->errors()], 422);
         }
-        Log::info('Langkah 3: Validasi input berhasil.');
 
-        $cvPath = null;
-        if ($request->hasFile('cv')) {
-            Log::info('Langkah 4: File CV terdeteksi. Mencoba menyimpan file...');
-            try {
-                $originalFileName = pathinfo($request->file('cv')->getClientOriginalName(), PATHINFO_FILENAME);
-                $extension = $request->file('cv')->getClientOriginalExtension();
-                $fileNameToStore = 'cv_' . $user->id . '_' . $job_posting->id . '_' . time() . '_' . \Illuminate\Support\Str::slug($originalFileName) . '.' . $extension;
-
-                // Ini adalah baris yang paling mungkin gagal
-                $cvPath = $request->file('cv')->storeAs('cvs', $fileNameToStore, 'public');
-
-                Log::info('Langkah 5: SUKSES menyimpan file CV.', ['path' => $cvPath]);
-            } catch (\Exception $e) {
-                Log::error('--- KRITIS: GAGAL MENYIMPAN FILE CV ---', ['user_id' => $user->id, 'error' => $e->getMessage()]);
-                // Langsung return error 500 karena ini masalah server (kemungkinan permissions)
-                return response()->json(['message' => 'Gagal mengunggah CV karena masalah server.', 'error_detail' => $e->getMessage()], 500);
-            }
-        }
-
+        // 3. Simpan ke Database
         try {
-            Log::info('Langkah 6: Mencoba menyimpan data lamaran ke database...');
-            $application = JobApplication::create([
-                'job_posting_id' => $job_posting->id,
-                'user_id' => $user->id,
-                'cv_path' => $cvPath,
-                'cover_letter' => $request->input('cover_letter'),
-                'status' => 'pending',
-            ]);
-            Log::info('Langkah 7: SUKSES menyimpan lamaran ke database.', ['application_id' => $application->id]);
+            $data = $request->all();
+            $data['posted_by'] = $currentUser->id; // Set ID HR sebagai pemosting
 
-            $application->load(['applicant:id,name,email', 'jobPosting.poster']);
+            $jobPosting = JobPosting::create($data);
+            $jobPosting->load('poster:id,name,avatar_img'); // Load data poster untuk respons
 
-            Log::info('Langkah 8: Mencoba mengirim notifikasi ke HR...');
-            $hrUser = $application->jobPosting->poster;
-            if ($hrUser) {
-                $hrUser->notify(new \App\Notifications\NewJobApplicationNotification($application));
-                Log::info('Langkah 9: SUKSES mengirim notifikasi ke HR.', ['hr_id' => $hrUser->id]);
-            } else {
-                Log::warning('Gagal mengirim notifikasi: Data HR (poster) tidak ditemukan.', ['job_posting_id' => $application->job_posting_id]);
-            }
-
-            Log::info('--- Proses Lamaran Selesai dengan Sukses ---');
-            return response()->json(['message' => 'Lamaran Anda berhasil dikirim!', 'data' => $application], 201);
+            return response()->json([
+                'message' => 'Lowongan pekerjaan berhasil diposting!',
+                'data' => $jobPosting
+            ], 201);
         } catch (\Exception $e) {
-            Log::error('--- KRITIS: GAGAL MENYIMPAN LAMARAN KE DATABASE ---', ['user_id' => $user->id, 'error' => $e->getMessage()]);
-            // Hapus file CV yang sudah terunggah jika database gagal
-            if ($cvPath && \Illuminate\Support\Facades\Storage::disk('public')->exists($cvPath)) {
-                \Illuminate\Support\Facades\Storage::disk('public')->delete($cvPath);
-            }
-            return response()->json(['message' => 'Terjadi kesalahan internal saat menyimpan lamaran Anda.', 'error_detail' => $e->getMessage()], 500);
+            Log::error('Gagal membuat JobPosting baru: ' . $e->getMessage());
+            return response()->json(['message' => 'Gagal menyimpan lowongan pekerjaan ke database.'], 500);
         }
     }
 
