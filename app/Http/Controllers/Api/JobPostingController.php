@@ -24,7 +24,7 @@ class JobPostingController extends Controller
             Log::info('Request from unauthenticated/guest user.');
         }
 
-        $query = JobPosting::with('poster:id,name,avatar_img_url');
+        $query = JobPosting::with('poster:id,name,avatar_img');
 
         // --- LOGIKA BARU YANG LEBIH AMAN ---
         if ($request->is('api/hr/*')) {
@@ -97,7 +97,7 @@ class JobPostingController extends Controller
 
         try {
             $jobPosting = JobPosting::create($data);
-            $jobPosting->load('poster:id,name,avatar_img_url');
+            $jobPosting->load('poster:id,name,avatar_img');
             return response()->json([
                 'message' => 'Lowongan pekerjaan berhasil diposting!',
                 'data' => $jobPosting
@@ -110,7 +110,7 @@ class JobPostingController extends Controller
 
     public function show(JobPosting $jobPosting)
     {
-        $jobPosting->load('poster:id,name,email,avatar_img_url');
+        $jobPosting->load('poster:id,name,email,avatar_img');
         // Tidak ada lagi company_logo_url yang perlu di-set secara manual
         return response()->json($jobPosting);
     }
@@ -152,7 +152,7 @@ class JobPostingController extends Controller
 
         try {
             $jobPosting->update($data);
-            $jobPosting->load('poster:id,name,avatar_img_url');
+            $jobPosting->load('poster:id,name,avatar_img');
             return response()->json([
                 'message' => 'Lowongan pekerjaan berhasil diperbarui!',
                 'data' => $jobPosting
