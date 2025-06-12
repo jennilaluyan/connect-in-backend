@@ -51,7 +51,7 @@ class JobApplicationController extends Controller
                 $originalFileName = pathinfo($request->file('cv')->getClientOriginalName(), PATHINFO_FILENAME);
                 $extension = $request->file('cv')->getClientOriginalExtension();
                 $fileNameToStore = 'cv_' . $user->id . '_' . $job_posting->id . '_' . time() . '_' . Str::slug($originalFileName) . '.' . $extension;
-                
+
                 $cvPath = $request->file('cv')->storeAs('cvs', $fileNameToStore, 'public');
                 Log::info('CV diunggah oleh User ID ' . $user->id, ['path' => $cvPath]);
             } catch (\Exception $e) {
@@ -68,7 +68,7 @@ class JobApplicationController extends Controller
                 'cover_letter' => $request->input('cover_letter'),
                 'status' => 'pending',
             ]);
-            
+
             // Load relasi yang diperlukan untuk notifikasi dan respons
             $application->load(['applicant:id,name,email', 'jobPosting.poster']);
 
@@ -108,13 +108,13 @@ class JobApplicationController extends Controller
             return response()->json(['data' => [], 'message' => 'Tidak ada pelamar atau Anda belum memposting pekerjaan.']);
         }
 
-        $query = JobApplication::with(['applicant:id,name,email,avatar_img_url', 'jobPosting:id,title,company_name'])
+        $query = JobApplication::with(['applicant:id,name,email,avatar_img', 'jobPosting:id,title,company_name'])
             ->whereIn('job_posting_id', $hrJobPostingIds);
 
         if ($request->filled('job_posting_id') && $hrJobPostingIds->contains($request->input('job_posting_id'))) {
             $query->where('job_posting_id', $request->input('job_posting_id'));
         }
-        
+
         $applications = $query->latest('created_at')->paginate($request->input('limit', 15));
         return response()->json($applications);
     }
@@ -202,8 +202,8 @@ class JobApplicationController extends Controller
             Log::info("Notifikasi status '{$newStatus}' dikirim ke User ID: " . $applicantUser->id);
         }
         // --- BATAS PENAMBAHAN ---
-        
-        $application->load(['applicant:id,name,email,avatar_img_url', 'jobPosting:id,title,company_name']);
+
+        $application->load(['applicant:id,name,email,avatar_img', 'jobPosting:id,title,company_name']);
 
         return response()->json([
             'message' => "Lamaran berhasil {$actionVerb}.",
