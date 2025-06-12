@@ -20,52 +20,46 @@ class JobPostingController extends Controller
         $currentUserId = Auth::id();
 
         Log::info('JobPostingController@index accessed.');
-        Log::info('Authenticated User ID: ' . ($currentUserId ?: 'Guest/None'));
-        if ($currentUser) {
-            Log::info('Authenticated User Role: ' . $currentUser->role);
-            Log::info('Authenticated User isApprovedHr(): ' . (method_exists($currentUser, 'isApprovedHr') && $currentUser->isApprovedHr() ? 'Yes' : 'No'));
-        }
+        Log::info('Request Path: ' . $request->path()); // Log path untuk debug
 
-        // Tidak perlu lagi eager load company_logo_url jika sudah dihapus dari model
+        // Mulai query dasar
         $query = JobPosting::with('poster:id,name,avatar_img_url');
 
-        $expectedHrRouteName = 'hr.job-postings.my-index';
-        $actualRouteName = $request->route()->getName();
-
-        Log::info('Expected HR Route Name for filter: ' . $expectedHrRouteName);
-        Log::info('Actual Route Name from request: ' . $actualRouteName);
-
-        $isHrMyPostingsRoute = $actualRouteName === $expectedHrRouteName;
-        Log::info('Is HR MyPostings Route? ' . ($isHrMyPostingsRoute ? 'Yes' : 'No'));
-
-        if ($isHrMyPostingsRoute) {
-            if ($currentUser && method_exists($currentUser, 'isApprovedHr') && $currentUser->isApprovedHr()) {
-                Log::info('[HR MyPostings Route Matched] Applying filter: posted_by = ' . $currentUserId);
-                $query->where('posted_by', $currentUserId);
-            } else {
-                Log::warning('[HR MyPostings Route Matched] User not an approved HR or not properly authenticated.', [
+        // --- LOGIKA BARU YANG LEBIH ROBUST ---
+        // Cek apakah request datang dari path HR
+        if ($request->is('api/hr/*')) {
+            Log::info('HR-specific path detected.');
+            // Jika user tidak terautentikasi atau bukan HR yang disetujui, tolak akses.
+            if (!$currentUser || !$currentUser->isApprovedHr()) {
+                Log::warning('[HR Path] User not an approved HR or not properly authenticated.', [
                     'user_id' => $currentUserId,
-                    'is_approved_hr' => ($currentUser && method_exists($currentUser, 'isApprovedHr')) ? $currentUser->isApprovedHr() : 'N/A'
+                    'role' => $currentUser ? $currentUser->role : 'Guest'
                 ]);
                 return response()->json(['data' => [], 'message' => 'Akses ditolak atau akun HR Anda belum diapprove.'], 403);
             }
-        } elseif ($request->has('my_postings') && $currentUser && method_exists($currentUser, 'isApprovedHr') && $currentUser->isApprovedHr()) {
-            Log::info('[Public Route with my_postings flag] Applying filter: posted_by = ' . $currentUserId);
+            // Filter postingan berdasarkan ID HR yang login
+            Log::info('[HR Path] Applying filter: posted_by = ' . $currentUserId);
             $query->where('posted_by', $currentUserId);
         } else {
-            Log::info('[Public Route] No user-specific posted_by filter applied.');
+            // --- INI ADALAH LOGIKA UNTUK PUBLIC DASHBOARD ---
+            Log::info('[Public Path] Fetching all job postings for public dashboard.');
+            // Di sini, kita tidak menerapkan filter posted_by
+            // Tambahkan filter pencarian jika ada
             if ($request->has('search')) {
-                $query->where(function ($q) use ($request) {
-                    $q->where('title', 'like', '%' . $request->search . '%')
-                        ->orWhere('company_name', 'like', '%' . $request->search . '%')
-                        ->orWhere('description', 'like', '%' . $request->search . '%');
+                $searchTerm = $request->search;
+                Log::info('Applying search filter with term: ' . $searchTerm);
+                $query->where(function ($q) use ($searchTerm) {
+                    $q->where('title', 'like', '%' . $searchTerm . '%')
+                        ->orWhere('company_name', 'like', '%' . $searchTerm . '%')
+                        ->orWhere('description', 'like', '%' . $searchTerm . '%')
+                        ->orWhere('location', 'like', '%' . $searchTerm . '%');
                 });
             }
         }
+        // --- AKHIR DARI LOGIKA BARU ---
 
         try {
-            Log::debug('SQL Query (before paginate): ' . $query->toSql());
-            Log::debug('SQL Bindings (before paginate): ', $query->getBindings());
+            Log::debug('SQL Query (before paginate): ' . $query->toSql(), $query->getBindings());
         } catch (\Exception $e) {
             Log::error('Error getting SQL for logging: ' . $e->getMessage());
         }
@@ -73,13 +67,8 @@ class JobPostingController extends Controller
         $jobPostings = $query->latest()->paginate($request->input('limit', 10));
         Log::info('Number of job postings retrieved: ' . $jobPostings->count() . ' for page ' . $jobPostings->currentPage());
 
-        $jobPostings->getCollection()->transform(function ($job) {
-            // Tidak ada lagi transformasi untuk company_logo_url
-            if (!$job->offsetExists('posted_date_formatted') && method_exists($job, 'getPostedDateAttribute')) {
-                $job->posted_date_formatted = $job->getPostedDateAttribute();
-            }
-            return $job;
-        });
+        // Transformasi koleksi tidak diperlukan lagi jika Anda sudah mengatur accessor di model
+        // Namun, jika ada, pastikan tidak ada error di dalamnya.
 
         return response()->json($jobPostings);
     }
