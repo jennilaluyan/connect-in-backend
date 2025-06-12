@@ -1,9 +1,0 @@
-{
-    "PHP_EXTENSIONS": [
-        "bcmath",
-        "openssl",
-        "pdo",
-        "pdo_pgsql",
-        "pgsql"
-    ]
-}

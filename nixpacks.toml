@@ -1,0 +1,4 @@
+# nixpacks.toml (Percobaan Versi Minimalis)
+
+[phases.setup]
+nixPkgs = ["php82Extensions.pgsql", "php82Extensions.pdo_pgsql"]
