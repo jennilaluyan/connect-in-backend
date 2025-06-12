@@ -1,17 +1,20 @@
+# Dockerfile Final
+
 # Gunakan image resmi PHP 8.2 dengan server Apache
 FROM php:8.2-apache
 
-# Install dependensi sistem yang dibutuhkan untuk ekstensi PHP
-# Juga install git dan unzip yang dibutuhkan oleh Composer
-RUN apt-get update && apt-get install -y \
+# --- BAGIAN YANG DIPERBAIKI ---
+# Install semua dependensi sistem SEBELUM install ekstensi PHP.
+# Termasuk: git, unzip, libpq-dev (untuk pgsql), libzip-dev (untuk zip), libicu-dev (untuk intl)
+RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     unzip \
     libpq-dev \
     libzip-dev \
+    libicu-dev \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Install ekstensi-ekstensi PHP yang kita butuhkan
-# (pdo, pdo_pgsql untuk koneksi Postgres, intl untuk Carbon/bahasa, zip untuk composer)
+# Sekarang install ekstensi PHP karena dependensi sistemnya sudah ada
 RUN docker-php-ext-install pdo pdo_pgsql pgsql intl zip
 
 # Install Composer secara global
@@ -29,11 +32,8 @@ RUN a2enmod rewrite
 COPY . /var/www/html
 
 # Install dependensi Laravel via Composer
-# Kita pindahkan ke sini agar perubahan kode tidak selalu memicu composer install ulang
 WORKDIR /var/www/html
 RUN composer install --no-dev --optimize-autoloader --no-scripts
 
 # Atur kepemilikan file agar server bisa menulis ke folder storage dan cache
 RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
-
-# Perintah start tidak perlu didefinisikan, karena image php:apache sudah akan menjalankan Apache secara default.
